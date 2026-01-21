@@ -3,7 +3,7 @@
 package credential
 
 import (
-	"net/url"
+	"fmt"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -13,34 +13,43 @@ type SupportedSerializationFlavor string // mime type
 
 const (
 	JwtVc      SupportedSerializationFlavor = "application/vc+jwt"
+	SDJwtVC    SupportedSerializationFlavor = "application/dc+sd-jwt"
 	MockFormat SupportedSerializationFlavor = "plain/mock" // For testing
 )
 
+// for OID4VP presentation submission. (vc format, vp format, err)
+func (sf *SupportedSerializationFlavor) OID4VPFormatIdentifier() (string, string, error) {
+	switch *sf {
+	case JwtVc:
+		return "jwt_vc_json", "jwt_vp_json", nil
+	case SDJwtVC:
+		return "dc+sd-jwt", "dc+sd-jwt", nil
+	case MockFormat:
+		return "mock_vc", "mock_vp", nil
+	default:
+		return "", "", fmt.Errorf("unknown serialization flavor")
+	}
+}
+
 type Credential struct {
-	ID          *url.URL
+	ID          string
 	Types       []string
-	Name        *string
-	Description *string
-	Issuer      url.URL
-	Subjects    []CredentialSubject
+	Name        string
+	Description string
+	Issuer      string
+	Subject     string
+	Claims      *CredentialClaim
 	ValidPeriod *CredentialValidPeriod
-	Status      *CredentialStatus
-	Schemas     *[]CredentialSchema
 	Proof       *CredentialProof
 }
 
 type CredentialPresentation struct {
-	ID          *url.URL
+	ID          string
 	Types       []string
 	Credentials [][]byte
-	Holder      *url.URL
+	Holder      string
 	Proof       *CredentialProof
 	Nonce       *string
-}
-
-type CredentialSubject struct {
-	ID     *url.URL
-	Claims map[string]interface{}
 }
 
 type CredentialValidPeriod struct {
@@ -48,9 +57,7 @@ type CredentialValidPeriod struct {
 	To   *time.Time
 }
 
-type CredentialStatus struct{}
-
-type CredentialSchema struct{}
+type CredentialClaim map[string]any
 
 type CredentialProof struct {
 	Algorithm jose.SignatureAlgorithm `json:"alg"`

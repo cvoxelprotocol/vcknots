@@ -43,6 +43,7 @@ import (
 	"github.com/trustknots/vcknots/wallet/internal/receiver"
 	"github.com/trustknots/vcknots/wallet/internal/receiver/types"
 	"github.com/trustknots/vcknots/wallet/internal/serializer"
+	"github.com/trustknots/vcknots/wallet/internal/serializer/plugins/sdjwtvc"
 	"github.com/trustknots/vcknots/wallet/internal/verifier"
 	"github.com/trustknots/vcknots/wallet/pkg/vcknots_wallet"
 )
@@ -270,7 +271,7 @@ func receiveCredential(controller *vcknots_wallet.Controller, key *MockKeyEntry,
 	return savedCredential
 }
 
-func presentation(controller *vcknots_wallet.Controller, key *MockKeyEntry, receivedCredential *vcknots_wallet.SavedCredential, logger *slog.Logger) {
+func presentation(controller *vcknots_wallet.Controller, key *MockKeyEntry, receivedCredential *vcknots_wallet.SavedCredential, options *sdjwtvc.SdJwtVcPresentationOptions, logger *slog.Logger) {
 	// Example verifier details
 	verifierURL := "http://localhost:8080"
 
@@ -431,7 +432,7 @@ func presentation(controller *vcknots_wallet.Controller, key *MockKeyEntry, rece
 	logger.Info("Request URI is valid", "scheme", urlParsed.Scheme)
 
 	// Present demo credential to the verifier
-	err = controller.PresentCredential(string(body), key)
+	err = controller.PresentCredential(string(body), key, options)
 	if err != nil {
 		logger.Error("Failed to present credential", "error", err)
 		panic(err)
@@ -509,5 +510,5 @@ func main() {
 	receivedCredential := receiveCredential(controller, mockKey, logger)
 
 	// Tests - Use the received credential for presentation
-	presentation(controller, mockKey, receivedCredential, logger)
+	presentation(controller, mockKey, receivedCredential, nil, logger)
 }

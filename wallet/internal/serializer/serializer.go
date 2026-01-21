@@ -7,6 +7,7 @@ import (
 	"github.com/trustknots/vcknots/wallet/internal/credential"
 	"github.com/trustknots/vcknots/wallet/internal/keystore"
 	"github.com/trustknots/vcknots/wallet/internal/serializer/plugins/jwtvc"
+	"github.com/trustknots/vcknots/wallet/internal/serializer/plugins/sdjwtvc"
 	"github.com/trustknots/vcknots/wallet/internal/serializer/types"
 )
 
@@ -37,8 +38,14 @@ func WithDefaultConfig() func(*SerializationDispatcher) error {
 		if err != nil {
 			return types.NewFormatError(credential.JwtVc, err, "failed to create JWT VC serializer")
 		}
-
 		d.RegisterPlugin(credential.JwtVc, jwtVcPlugin)
+
+		sdJwtVcPlugin, err := sdjwtvc.NewSdJwtVcSerializer()
+		if err != nil {
+			return types.NewFormatError(credential.JwtVc, err, "failed to create SD-JWT VC serializer")
+		}
+		d.RegisterPlugin(credential.SDJwtVC, sdJwtVcPlugin)
+
 		return nil
 	}
 }
@@ -108,7 +115,7 @@ func (d *SerializationDispatcher) DeserializeCredential(flavor credential.Suppor
 }
 
 // SerializePresentation serializes a credential presentation using the appropriate format-specific plugin
-func (d *SerializationDispatcher) SerializePresentation(flavor credential.SupportedSerializationFlavor, presentation *credential.CredentialPresentation, key keystore.KeyEntry) ([]byte, *credential.CredentialPresentation, error) {
+func (d *SerializationDispatcher) SerializePresentation(flavor credential.SupportedSerializationFlavor, presentation *credential.CredentialPresentation, key keystore.KeyEntry, options types.SerializePresentationOptions) ([]byte, *credential.CredentialPresentation, error) {
 	if presentation == nil {
 		return nil, nil, types.NewFormatError(flavor, types.ErrInvalidPresentation, "presentation cannot be nil")
 	}
@@ -121,7 +128,7 @@ func (d *SerializationDispatcher) SerializePresentation(flavor credential.Suppor
 		return nil, nil, err
 	}
 
-	result, signedPresentation, err := plugin.SerializePresentation(flavor, presentation, key)
+	result, signedPresentation, err := plugin.SerializePresentation(flavor, presentation, key, options)
 	if err != nil {
 		return nil, nil, types.NewFormatError(flavor, err, "presentation serialization failed")
 	}

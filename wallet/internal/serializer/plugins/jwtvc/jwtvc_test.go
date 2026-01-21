@@ -4,9 +4,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"net/url"
 	"testing"
 
 	"github.com/go-jose/go-jose/v4"
@@ -66,43 +66,6 @@ func TestDeserializeCredential_EmptyParts(t *testing.T) {
 	}
 }
 
-func TestParseAlgorithm(t *testing.T) {
-	serializer := &JwtVcSerializer{}
-
-	tests := []struct {
-		name      string
-		algStr    string
-		expected  jose.SignatureAlgorithm
-		expectErr bool
-	}{
-		{"ES256", "ES256", jose.ES256, false},
-		{"ES384", "ES384", jose.ES384, false},
-		{"ES512", "ES512", jose.ES512, false},
-		{"EdDSA", "EdDSA", jose.EdDSA, false},
-		{"RS256", "RS256", jose.RS256, false},
-		{"unsupported", "HS256", "", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := serializer.parseAlgorithm(tt.algStr)
-
-			if tt.expectErr {
-				if err == nil {
-					t.Fatal("expected error")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if result != tt.expected {
-					t.Errorf("expected %v, got %v", tt.expected, result)
-				}
-			}
-		})
-	}
-}
-
 func TestConvertCredentialSubjectFromJSON(t *testing.T) {
 	serializer := &JwtVcSerializer{}
 
@@ -113,18 +76,18 @@ func TestConvertCredentialSubjectFromJSON(t *testing.T) {
 			"age":  30,
 		}
 
-		subject, err := serializer.convertCredentialSubjectFromJSON(input)
+		subjectID, claims, err := serializer.convertCredentialSubjectFromJSON(input)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if subject == nil {
-			t.Fatal("expected subject to be non-nil")
+		if claims == nil {
+			t.Fatal("expected claims to be non-nil")
 		}
-		if subject.ID == nil {
-			t.Fatal("expected subject ID to be non-nil")
+		if subjectID == "" {
+			t.Fatal("expected subject ID to be non-empty")
 		}
-		if subject.ID.String() != "http://example.com/subject" {
-			t.Errorf("expected subject ID to be http://example.com/subject, got %s", subject.ID.String())
+		if subjectID != "http://example.com/subject" {
+			t.Errorf("expected subject ID to be http://example.com/subject, got %s", subjectID)
 		}
 	})
 
@@ -134,15 +97,15 @@ func TestConvertCredentialSubjectFromJSON(t *testing.T) {
 			"age":  25,
 		}
 
-		subject, err := serializer.convertCredentialSubjectFromJSON(input)
+		subjectID, claims, err := serializer.convertCredentialSubjectFromJSON(input)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if subject == nil {
-			t.Fatal("expected subject to be non-nil")
+		if claims == nil {
+			t.Fatal("expected claims to be non-nil")
 		}
-		if subject.ID != nil {
-			t.Error("expected subject ID to be nil")
+		if subjectID != "" {
+			t.Error("expected subject ID to be empty")
 		}
 	})
 }
@@ -151,8 +114,8 @@ func TestConvertPresentationToMap(t *testing.T) {
 	serializer := &JwtVcSerializer{}
 
 	// Create test URLs
-	presentationID, _ := url.Parse("http://example.com/presentation/1")
-	holderID, _ := url.Parse("http://example.com/holder")
+	presentationID := "http://example.com/presentation/1"
+	holderID := "http://example.com/holder"
 
 	presentation := &credential.CredentialPresentation{
 		ID:     presentationID,
@@ -166,46 +129,19 @@ func TestConvertPresentationToMap(t *testing.T) {
 
 	result := serializer.convertPresentationToMap(presentation)
 
-	if result["id"] != presentation.ID.String() {
-		t.Errorf("expected ID %s, got %v", presentation.ID.String(), result["id"])
+	if result["id"] != presentation.ID {
+		t.Errorf("expected ID %s, got %v", presentation.ID, result["id"])
 	}
-	if result["holder"] != presentation.Holder.String() {
-		t.Errorf("expected holder %s, got %v", presentation.Holder.String(), result["holder"])
-	}
-}
-
-func TestGetHashAlgorithm(t *testing.T) {
-	serializer := &JwtVcSerializer{}
-
-	algorithms := []jose.SignatureAlgorithm{
-		jose.ES256,
-		jose.ES384,
-		jose.ES512,
-		jose.EdDSA,
-		jose.RS256,
-	}
-
-	for _, alg := range algorithms {
-		t.Run(string(alg), func(t *testing.T) {
-			hasher := serializer.getHashAlgorithm(alg)
-			if hasher == nil {
-				t.Fatal("expected hasher to be non-nil")
-			}
-
-			// Test that hash works by computing something
-			hasher.Write([]byte("test"))
-			digest := hasher.Sum(nil)
-			if len(digest) == 0 {
-				t.Error("expected digest to be non-empty")
-			}
-		})
+	if result["holder"] != presentation.Holder {
+		t.Errorf("expected holder %s, got %v", presentation.Holder, result["holder"])
 	}
 }
 
 // mockKeyEntry implements keystore.KeyEntry for testing
 type mockKeyEntry struct {
-	keyID string
-	key   jose.JSONWebKey
+	keyID      string
+	publicKey  jose.JSONWebKey
+	privateKey *ecdsa.PrivateKey
 }
 
 func (m *mockKeyEntry) ID() string {
@@ -213,11 +149,15 @@ func (m *mockKeyEntry) ID() string {
 }
 
 func (m *mockKeyEntry) PublicKey() jose.JSONWebKey {
-	return m.key
+	return m.publicKey
 }
 
 func (m *mockKeyEntry) Sign(data []byte) ([]byte, error) {
-	return []byte("mock-signature-" + m.keyID), nil
+	// Hash the data using SHA-256
+	hash := sha256.Sum256(data)
+
+	// Sign using ECDSA and return DER-encoded signature
+	return ecdsa.SignASN1(rand.Reader, m.privateKey, hash[:])
 }
 
 func createMockKeyEntry() keystore.KeyEntry {
@@ -232,8 +172,9 @@ func createMockKeyEntry() keystore.KeyEntry {
 	}
 
 	return &mockKeyEntry{
-		keyID: "test-key-id",
-		key:   jwk,
+		keyID:      "test-key-id",
+		publicKey:  jwk,
+		privateKey: privateKey,
 	}
 }
 
@@ -246,14 +187,14 @@ func TestSerializePresentation(t *testing.T) {
 	// Test with unsupported format
 	presentation := &credential.CredentialPresentation{}
 	key := createMockKeyEntry()
-	_, _, err = serializer.SerializePresentation(credential.MockFormat, presentation, key)
+	_, _, err = serializer.SerializePresentation(credential.MockFormat, presentation, key, nil)
 	if err == nil {
 		t.Fatal("expected error for unsupported format")
 	}
 
 	// Test with valid JWT VC format
-	presentationID, _ := url.Parse("http://example.com/presentation/1")
-	holderID, _ := url.Parse("http://example.com/holder")
+	presentationID := "http://example.com/presentation/1"
+	holderID := "http://example.com/holder"
 	nonce := "test-nonce"
 
 	presentation = &credential.CredentialPresentation{
@@ -267,7 +208,7 @@ func TestSerializePresentation(t *testing.T) {
 		},
 	}
 
-	jwtBytes, presentationWithProof, err := serializer.SerializePresentation(credential.JwtVc, presentation, key)
+	jwtBytes, presentationWithProof, err := serializer.SerializePresentation(credential.JwtVc, presentation, key, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -317,10 +258,11 @@ func TestGetAlgorithmFromKey(t *testing.T) {
 	// Test with key without algorithm specified
 	keyWithoutAlg := &mockKeyEntry{
 		keyID: "test-key-2",
-		key: jose.JSONWebKey{
+		publicKey: jose.JSONWebKey{
 			KeyID: "test-key-2",
 			Use:   "sig",
 		},
+		privateKey: nil,
 	}
 
 	alg = serializer.getAlgorithmFromKey(keyWithoutAlg)
@@ -345,11 +287,12 @@ func TestGetAlgorithmFromKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			key := &mockKeyEntry{
 				keyID: "test-key-" + tt.name,
-				key: jose.JSONWebKey{
+				publicKey: jose.JSONWebKey{
 					Algorithm: tt.algorithm,
 					KeyID:     "test-key-" + tt.name,
 					Use:       "sig",
 				},
+				privateKey: nil,
 			}
 
 			alg := serializer.getAlgorithmFromKey(key)
@@ -465,21 +408,21 @@ func TestConvertCredentialFromJSON(t *testing.T) {
 			t.Fatal("expected credential to be non-nil")
 		}
 
-		if cred.ID == nil {
-			t.Error("expected credential ID to be non-nil")
+		if cred.ID == "" {
+			t.Error("expected credential ID to be non-empty")
 		}
 
 		if len(cred.Types) == 0 {
 			t.Error("expected credential types to be non-empty")
 		}
 
-		// Issuer is a URL, not a pointer
-		if cred.Issuer.String() == "" {
+		// Issuer is a string
+		if cred.Issuer == "" {
 			t.Error("expected credential issuer to be non-empty")
 		}
 
-		if len(cred.Subjects) == 0 {
-			t.Error("expected credential subjects to be non-empty")
+		if cred.Subject == "" && cred.Claims == nil {
+			t.Error("expected credential subject or claims to be non-empty")
 		}
 	})
 
