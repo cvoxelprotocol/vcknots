@@ -37,17 +37,20 @@ import (
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
-	"github.com/trustknots/vcknots/wallet/internal/credential"
-	"github.com/trustknots/vcknots/wallet/internal/credstore"
-	"github.com/trustknots/vcknots/wallet/internal/idprof"
-	"github.com/trustknots/vcknots/wallet/internal/presenter"
-	"github.com/trustknots/vcknots/wallet/internal/presenter/plugins/oid4vp"
-	"github.com/trustknots/vcknots/wallet/internal/receiver"
-	"github.com/trustknots/vcknots/wallet/internal/serializer"
-	"github.com/trustknots/vcknots/wallet/internal/serializer/plugins/sdjwtvc"
-	"github.com/trustknots/vcknots/wallet/internal/verifier"
-	"github.com/trustknots/vcknots/wallet/pkg/vcknots_wallet"
+	"github.com/trustknots/vcknots/wallet"
+	"github.com/trustknots/vcknots/wallet/credential"
+	"github.com/trustknots/vcknots/wallet/credstore"
+	"github.com/trustknots/vcknots/wallet/idprof"
+	"github.com/trustknots/vcknots/wallet/presenter"
+	"github.com/trustknots/vcknots/wallet/presenter/plugins/oid4vp"
+	"github.com/trustknots/vcknots/wallet/receiver"
+	"github.com/trustknots/vcknots/wallet/serializer"
+	"github.com/trustknots/vcknots/wallet/serializer/plugins/sdjwtvc"
+	"github.com/trustknots/vcknots/wallet/verifier"
 )
+
+// Default certificate path relative to server_integration_sdjwt/ directory
+const defaultCertPath = "../../../server/samples/certificate-openid-test/certificate_openid.pem"
 
 // MockKeyEntry implements IKeyEntry interface for demo purposes
 type MockKeyEntry struct {
@@ -129,7 +132,7 @@ func (m *MockKeyEntry) Sign(payload []byte) ([]byte, error) {
 }
 
 
-func presentation(controller *vcknots_wallet.Controller, key *MockKeyEntry, receivedCredential *vcknots_wallet.SavedCredential, options *sdjwtvc.SdJwtVcPresentationOptions, logger *slog.Logger) {
+func presentation(w *wallet.Wallet, key *MockKeyEntry, receivedCredential *wallet.SavedCredential, options *sdjwtvc.SdJwtVcPresentationOptions, logger *slog.Logger) {
 	// Example verifier details
 	verifierURL := "http://localhost:8080"
 
@@ -278,7 +281,7 @@ func presentation(controller *vcknots_wallet.Controller, key *MockKeyEntry, rece
 	logger.Info("Request URI is valid", "scheme", urlParsed.Scheme)
 
 	// Present demo credential to the verifier
-	err = controller.PresentCredential(string(body), key, options)
+	err = w.PresentCredential(string(body), key, options)
 	if err != nil {
 		logger.Error("Failed to present credential", "error", err)
 		panic(err)
@@ -295,8 +298,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	// Save example sd-jwt credential
-	sdJwtCredFile, err := os.ReadFile("./examples/server_integration_sdjwt/example_sd_jwt.txt")
+	sdJwtCredFile, err := os.ReadFile("example_sd_jwt.txt")
 	if err != nil {
 		panic(err)
 	}
@@ -309,6 +313,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	savedSdJwtCredEntry, err := credStore.GetCredentialEntry("sample-sdjwt", credstore.SupportedCredStoreTypes(0))
 	if err != nil {
 		panic(err)
@@ -333,7 +338,11 @@ func main() {
 
 	// Create presenter with default config
 	// Load the server's certificate for TLS verification
-	certFile, err := os.ReadFile("../server/samples/certificate-openid-test/certificate_openid.pem")
+	certPath := os.Getenv("VCKNOTS_CERT_PATH")
+	if certPath == "" {
+		certPath = defaultCertPath
+	}
+	certFile, err := os.ReadFile(certPath)
 	if err != nil {
 		panic(err)
 	}
@@ -355,7 +364,7 @@ func main() {
 		panic(err)
 	}
 
-	config := vcknots_wallet.ControllerConfig{
+	config := wallet.Config{
 		CredStore:  credStore,
 		IDProfiler: idProf,
 		Receiver:   receiver,
@@ -364,7 +373,7 @@ func main() {
 		Presenter:  presenter,
 	}
 
-	controller, err := vcknots_wallet.NewController(config)
+	w, err := wallet.NewWalletWithConfig(config)
 	if err != nil {
 		panic(err)
 	}
@@ -378,7 +387,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	savedSdJwtCred := vcknots_wallet.SavedCredential{
+	savedSdJwtCred := wallet.SavedCredential{
 		Credential: deserializedSdJwtCred,
 		Entry:      savedSdJwtCredEntry,
 	}
@@ -388,5 +397,5 @@ func main() {
 		SelectedClaims:    []string{"given_name"},
 		RequireKeyBinding: false,
 	}
-	presentation(controller, mockKey, &savedSdJwtCred, &options, logger)
+	presentation(w, mockKey, &savedSdJwtCred, &options, logger)
 }
